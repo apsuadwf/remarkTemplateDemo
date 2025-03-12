@@ -1186,6 +1186,7 @@ export default {
 
 .modal-actions {
     display: flex;
+    gap: 25px;
     justify-content: flex-end;
     margin-top: 20px;
 }
