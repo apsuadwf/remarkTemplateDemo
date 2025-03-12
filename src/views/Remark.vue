@@ -2,24 +2,17 @@
     <div class="enhanced-editor">
         <h3 class="editor-title">备注模板编辑器</h3>
 
-        <!-- 变量选择区 -->
-        <div class="variable-buttons">
-            <button
-                v-for="varItem in variables"
-                :key="varItem.name"
-                @click="insertVariable(varItem)"
-                class="var-btn"
-                :title="`插入${varItem.label}变量`"
-            >
-                {{ varItem.label }}
-            </button>
-            <button
-                class="var-btn add-btn"
-                @click="showAddVariableModal = true"
-                title="添加自定义变量"
-            >
-                <i class="plus-icon">+</i>
-            </button>
+        <!-- 使用变量选择器组件 -->
+        <variable-selector 
+            :variables="variables"
+            @drag-start="onVariableDragStart"
+            @show-add-variable="showAddVariableModal = true"
+        />
+
+        <!-- 拖拽提示 -->
+        <div class="drag-tip">
+            <i class="tip-icon">💡</i> 
+            <span>提示：您可以拖拽上方的变量到编辑区，放置后也可以拖拽调整顺序</span>
         </div>
 
         <!-- 内容编辑区 -->
@@ -33,6 +26,10 @@
             @click="setFocusPosition"
             @compositionstart="onCompositionStart"
             @compositionend="onCompositionEnd"
+            @dragover="onDragOver"
+            @drop="onDrop"
+            @dragenter="onDragEnter"
+            @dragleave="onDragLeave"
             :placeholder="placeholder"
         ></div>
 
@@ -89,57 +86,44 @@
             style="display: none;"
         ></textarea>
 
-        <!-- 添加变量弹窗 (简单实现) -->
-        <div v-if="showAddVariableModal" class="modal-overlay">
-            <div class="modal-content">
-                <h3>添加自定义变量</h3>
-                <div class="form-group">
-                    <label>变量名称</label>
-                    <input v-model="newVariable.name" placeholder="如：productName"/>
-                </div>
-                <div class="form-group">
-                    <label>显示标签</label>
-                    <input v-model="newVariable.label" placeholder="如：产品名称"/>
-                </div>
-                <div class="form-group">
-                    <label>示例值</label>
-                    <input v-model="newVariable.example" placeholder="如：iPhone 14 Pro Max"/>
-                </div>
-                <div class="modal-actions">
-                    <button @click="addNewVariable" class="primary-btn">添加</button>
-                    <button @click="showAddVariableModal = false" class="cancel-btn">取消</button>
-                </div>
-            </div>
-        </div>
+        <!-- 使用变量添加弹窗组件 -->
+        <variable-add-modal
+            :visible="showAddVariableModal"
+            :existing-variables="variables"
+            @close="showAddVariableModal = false"
+            @add-variable="addVariable"
+        />
     </div>
 </template>
 
 <script>
+import {
+    checkForInvalidContent,
+    convertHtmlToRawText,
+    convertVariablesToHtml,
+    defaultVariables,
+    generatePreviewContent
+} from '@/utils/variables';
+import {copyElementContent} from '@/utils/domUtils';
+import {
+    handleDragEnter,
+    handleDragLeave,
+    handleDragOver,
+    handleVariableDrop,
+    removeAllDropIndicators
+} from '@/utils/dragUtils';
+import VariableSelector from '@/components/VariableSelector.vue';
+import VariableAddModal from '@/components/VariableAddModal.vue';
+
 export default {
+    components: {
+        VariableSelector,
+        VariableAddModal
+    },
     computed: {
         // 预览内容 - 使用示例值替换变量
         previewContent() {
-            if (!this.rawContent) return '';
-            let content = this.rawContent;
-            const colorMap = new Map();
-            // 替换所有变量为示例值
-            this.variables.forEach(variable => {
-                const regex = new RegExp(`\\$\\{${variable.name}\\}`, 'g');
-                const variableValue = variable.example || `[${variable.label}]`;
-                // 随机颜色
-                // const color = `#${Math.floor(Math.random() * 16777215).toString(16)}`;
-                let hue = null;
-                do {
-                    hue = Math.floor(Math.random() * 360);
-                }while (colorMap.has(hue));
-
-                const color = `hsl(${hue}, 70%, 35%)`;
-                const underLine = `<u style="color: ${color};border-color: ${color};">${variableValue}</u>`;
-                content = content.replace(regex, underLine);
-
-            });
-            
-            return content;
+            return generatePreviewContent(this.rawContent, this.variables);
         }
     },
     data() {
@@ -152,45 +136,13 @@ export default {
             hasInvalidContent: false, // 是否包含非法内容
             
             // 变量相关
-            variables: [
-                {
-                    name: 'userName',
-                    label: '用户姓名',
-                    example: "张三",
-                    description: "用户的真实姓名",
-                },
-                {
-                    name: 'orderNo',
-                    label: '订单编号',
-                    example: "ORD202312250001",
-                    description: "系统生成的订单唯一编号",
-                },
-                {
-                    name: 'productName',
-                    label: '产品名称',
-                    example: "智能手机 Pro Max",
-                    description: "产品的完整名称",
-                },
-                {
-                    name: 'date',
-                    label: '日期',
-                    example: "2023-12-25",
-                    description: "日期格式：YYYY-MM-DD",
-                },
-                {
-                    name: 'amount',
-                    label: '金额',
-                    example: "1999.00",
-                    description: "金额（元），最多保留两位小数",
-                }
-            ],
+            variables: [...defaultVariables],
 
             // 新增变量相关
             showAddVariableModal: false, // 是否显示添加变量弹窗
-            newVariable: {name: '', label: ''}, // 新变量数据
-
+            
             // 编辑器状态相关
-            placeholder: '在此输入内容，点击上方按钮插入变量...', // 编辑器占位符
+            placeholder: '在此输入内容，可以从上方拖拽变量至此...', // 编辑器占位符
             lastCursorPosition: null, // 上次光标位置
             lastSelection: null, // 保存最后一次有效选区
             isComposing: false, // 输入法组合状态跟踪
@@ -199,7 +151,10 @@ export default {
 
             // 原始文本编辑状态
             editingRawText: false, // 是否正在编辑原始文本
-            editDelay: null // 防抖延迟器
+
+            // 拖拽相关
+            globalDraggedElement: null, // 全局拖拽元素引用
+            currentDropRange: null, // 当前放置范围
         }
     },
     mounted() {
@@ -237,22 +192,21 @@ export default {
         }
     },
     methods: {
+        // 防抖函数
+        debounce(fn, delay = 300) {
+            if (this[`_debounceTimer_${fn.name}`]) {
+                clearTimeout(this[`_debounceTimer_${fn.name}`]);
+            }
+            this[`_debounceTimer_${fn.name}`] = setTimeout(() => {
+                fn.apply(this);
+            }, delay);
+        },
+        
         // ===== 原始文本处理相关方法 =====
 
         // 检查原始文本是否包含HTML标签或特殊字符
         checkForInvalidContent(text) {
-            if (!text) return false;
-
-            // 检查HTML标签
-            const htmlTagRegex = /<[^>]*>/;
-            if (htmlTagRegex.test(text)) {
-                return true;
-            }
-
-            // 检查特殊字符（除了常规标点和变量标记）
-            // 排除：字母、数字、中文字符、常规标点和变量标记 ${xxx}
-            const safeCharRegex = /^[\u4e00-\u9fa5a-zA-Z0-9\s,.?!;:'"()[\]{}。，、；：''""《》【】\-_${}]+$/;
-            return !safeCharRegex.test(text);
+            return checkForInvalidContent(text);
         },
 
         // 切换原始文本编辑模式
@@ -304,12 +258,7 @@ export default {
 
         // 原始文本输入处理
         onRawTextInput() {
-            // 防抖处理，避免频繁验证和转换
-            if (this.editDelay) {
-                clearTimeout(this.editDelay);
-            }
-
-            this.editDelay = setTimeout(() => {
+            this.debounce(() => {
                 // 检查内容有效性
                 this.hasInvalidContent = this.checkForInvalidContent(this.rawContent);
 
@@ -347,19 +296,9 @@ export default {
                 return;
             }
 
-            let html = this.rawContent;
-
-            // 将变量标记 ${xxx} 转换为HTML变量标签
-            const varRegex = /\$\{([^}]+)\}/g;
-            html = html.replace(varRegex, (match, varName) => {
-                // 查找对应的变量标签文本
-                const variable = this.variables.find(v => v.name === varName);
-                const label = variable ? variable.label : varName;
-                const description = variable ? variable.description : '';
-                // 返回HTML变量标签
-                return `<span class="variable-tag" contenteditable="false" data-variable="${varName}" data-description="${description}">${label}</span>`;
-            });
-
+            // 转换变量为HTML
+            const html = convertVariablesToHtml(this.rawContent, this.variables);
+            
             // 应用到编辑器
             this.$refs.editor.innerHTML = html;
 
@@ -378,25 +317,7 @@ export default {
                 return '';
             }
 
-            // 创建临时容器保存当前HTML
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = this.$refs.editor.innerHTML;
-
-            // 移除所有空的 <br> 标签
-            const brElements = tempDiv.querySelectorAll('br');
-            brElements.forEach(br => {
-                if (br.parentNode === tempDiv && tempDiv.childNodes.length === 1) {
-                    br.remove();
-                }
-            });
-
-            // 替换所有变量标签为变量标记
-            let result = tempDiv.innerHTML;
-            Array.from(tempDiv.querySelectorAll('.variable-tag')).forEach(el => {
-                result = result.replace(el.outerHTML, `\${${el.dataset.variable}}`);
-            });
-
-            return result;
+            return convertHtmlToRawText(this.$refs.editor);
         },
 
         // ===== 变量处理相关方法 =====
@@ -489,14 +410,93 @@ export default {
 
         // 保护变量不被修改
         protectVariables() {
+            if (!this.$refs.editor) return;
+            
             const editor = this.$refs.editor;
             const variables = editor.querySelectorAll('.variable-tag');
-
+            
             variables.forEach(el => {
-                if (el.getAttribute('contenteditable') !== 'false') {
-                    el.setAttribute('contenteditable', 'false');
+                // 设置不可编辑
+                el.setAttribute('contenteditable', 'false');
+                
+                // 确保变量可拖拽
+                el.setAttribute('draggable', 'true');
+                
+                try {
+                    // 先移除现有监听器以避免重复绑定
+                    el.removeEventListener('dragstart', this.handleVariableDragStart);
+                    el.removeEventListener('dragend', this.handleVariableDragEnd);
+                    
+                    // 再添加新的事件监听器
+                    el.addEventListener('dragstart', this.handleVariableDragStart);
+                    el.addEventListener('dragend', this.handleVariableDragEnd);
+                } catch (error) {
+                    console.error('变量事件绑定失败:', error);
+                    
+                    // 回退方法：完全重新创建元素
+                    try {
+                        const oldElement = el;
+                        const newElement = document.createElement('span');
+                        
+                        // 复制所有属性
+                        Array.from(oldElement.attributes).forEach(attr => {
+                            newElement.setAttribute(attr.name, attr.value);
+                        });
+                        
+                        // 复制内容
+                        newElement.textContent = oldElement.textContent;
+                        
+                        // 设置必要的属性
+                        newElement.classList.add('variable-tag');
+                        newElement.setAttribute('contenteditable', 'false');
+                        newElement.setAttribute('draggable', 'true');
+                        newElement.dataset.variable = oldElement.dataset.variable;
+                        if (oldElement.dataset.description) {
+                            newElement.dataset.description = oldElement.dataset.description;
+                        }
+                        
+                        // 添加拖拽事件
+                        newElement.addEventListener('dragstart', this.handleVariableDragStart);
+                        newElement.addEventListener('dragend', this.handleVariableDragEnd);
+                        
+                        // 替换元素
+                        if (oldElement.parentNode) {
+                            oldElement.parentNode.replaceChild(newElement, oldElement);
+                        }
+                    } catch (replaceError) {
+                        console.error('重新创建变量元素失败:', replaceError);
+                    }
                 }
             });
+        },
+
+        // 清理事件监听器
+        cleanupEventListeners(el) {
+            try {
+                // 先移除现有监听器
+                el.removeEventListener('dragstart', this.handleVariableDragStart);
+                el.removeEventListener('dragend', this.handleVariableDragEnd);
+                
+                // 返回原元素，让后续代码继续工作
+                return el;
+            } catch (error) {
+                console.error('清理事件监听器失败:', error);
+                
+                // 如果移除失败，尝试克隆替换元素
+                try {
+                    const oldElement = el;
+                    const newElement = oldElement.cloneNode(true);
+                    
+                    if (oldElement.parentNode) {
+                        oldElement.parentNode.replaceChild(newElement, oldElement);
+                    }
+                    
+                    return newElement;
+                } catch (cloneError) {
+                    console.error('替换元素失败:', cloneError);
+                    return el; // 返回原元素，避免空引用
+                }
+            }
         },
 
         // 判断是否在变量区域内
@@ -511,15 +511,13 @@ export default {
         },
 
         // 添加新变量
-        addNewVariable() {
-            if (this.newVariable.name && this.newVariable.label) {
-                // 检查变量名是否已存在
-                const exists = this.variables.some(v => v.name === this.newVariable.name);
-                if (!exists) {
-                    this.variables.push({...this.newVariable});
-                    this.newVariable = {name: '', label: ''};
-                    this.showAddVariableModal = false;
-                }
+        addVariable(variable) {
+            // 检查变量名是否已存在
+            const exists = this.variables.some(v => v.name === variable.name);
+            
+            if (!exists) {
+                this.variables.push({...variable});
+                this.showAddVariableModal = false;
             }
         },
 
@@ -579,7 +577,6 @@ export default {
         onEditorInput(e) {
             // 检查内容中是否有变量格式 ${...}
             let editorContent = this.$refs.editor.innerHTML;
-            console.log('输入事件处理1:', editorContent);
             const varFormatRegex = /\$\{[^}]*\}/g;
 
             if (editorContent === '<br>'){
@@ -587,7 +584,6 @@ export default {
                 this.$refs.editor.innerHTML = '';
                 editorContent = '';
             }
-            console.log('输入事件处理2:', editorContent);
 
             if (varFormatRegex.test(editorContent)) {
                 // 恢复到之前的内容
@@ -739,7 +735,13 @@ export default {
 
         // 同步原始内容
         syncRawContent() {
-            this.rawContent = this.getRawText();
+            const newRawContent = this.getRawText();
+            
+            // 检查内容是否真的变化了
+            if (this.rawContent !== newRawContent) {
+                this.rawContent = newRawContent;
+            }
+            
             // 检查内容有效性
             this.hasInvalidContent = this.checkForInvalidContent(this.rawContent);
         },
@@ -778,498 +780,133 @@ export default {
 
         // 复制内容
         copyContent() {
-            try {
-                // 复制原始内容（含变量标记）
-                const textarea = document.createElement('textarea');
-                textarea.value = this.rawContent;
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textarea);
+            if (copyElementContent(this.$refs.editor)) {
                 alert('内容已复制到剪贴板');
-            } catch (err) {
-                console.error('复制失败:', err);
+            } else {
+                alert('复制失败，请手动选择并复制');
             }
-        }
+        },
+
+        // 拖拽处理
+        onDragStart(e, varItem) {
+            // 设置变量数据
+            const varData = {...varItem, isInEditor: false}; // 标记为编辑器外的变量
+            e.dataTransfer.setData('text/plain', JSON.stringify(varData));
+            e.dataTransfer.effectAllowed = 'copy';
+        },
+
+        // 拖拽经过
+        onDragOver(event) {
+            handleDragOver(event, this.$refs.editor);
+        },
+
+        // 拖拽进入
+        onDragEnter(event) {
+            handleDragEnter(event, this.$refs.editor);
+        },
+
+        // 拖拽离开
+        onDragLeave(event) {
+            handleDragLeave(event, this.$refs.editor);
+        },
+
+        // 拖拽放下
+        onDrop(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            
+            try {
+                const data = event.dataTransfer.getData('text/plain');
+                if (!data) return;
+                
+                const variable = JSON.parse(data);
+                
+                // 创建变量HTML
+                const variableHtml = `<span class="variable-tag" contenteditable="false" data-variable="${variable.name}" data-description="${variable.description || ''}" draggable="true">${variable.label}</span>`;
+                
+                // 处理放置
+                if (handleVariableDrop(event, this.$refs.editor, (v) => {
+                    return `<span class="variable-tag" contenteditable="false" data-variable="${v.name}" data-description="${v.description || ''}" draggable="true">${v.label}</span>`;
+                })) {
+                    // 更新内容
+                    this.onEditorInput();
+                    
+                    // 保护变量
+                    this.protectVariables();
+                }
+                
+                // 移除放置标记
+                removeAllDropIndicators(this.$refs.editor);
+                
+                // 移除拖拽状态
+                this.$refs.editor.classList.remove('drag-over');
+            } catch (e) {
+                console.error('放置变量失败:', e);
+            }
+        },
+
+        // 变量拖拽开始事件处理
+        handleVariableDragStart(e) {
+            // 设置拖拽数据和效果
+            const variableEl = e.target;
+            const variableName = variableEl.dataset.variable;
+            const variableLabel = variableEl.textContent;
+            const variableDesc = variableEl.dataset.description || '';
+            
+            // 存储变量数据
+            const varData = {
+                name: variableName,
+                label: variableLabel,
+                description: variableDesc,
+                isInEditor: true // 标记这是编辑器内的变量
+            };
+            
+            try {
+                e.dataTransfer.setData('text/plain', JSON.stringify(varData));
+                e.dataTransfer.effectAllowed = 'move';
+            } catch (error) {
+                console.error('设置拖拽数据失败:', error);
+            }
+            
+            // 添加样式
+            variableEl.classList.add('dragging');
+            
+            // 直接使用组件实例存储引用
+            this.globalDraggedElement = variableEl;
+        },
+
+        // 变量拖拽结束事件处理
+        handleVariableDragEnd(e) {
+            // 移除拖拽样式
+            e.target.classList.remove('dragging');
+            
+            // 移除所有放置指示器
+            const indicators = document.querySelectorAll('.drop-indicator');
+            indicators.forEach(indicator => indicator.remove());
+            
+            // 重置拖拽状态
+            this.globalDraggedElement = null;
+            
+            // 移除编辑器的拖拽样式
+            const editor = document.querySelector('.styled-editor');
+            if (editor) {
+                editor.classList.remove('drag-over');
+            }
+            
+            // 延迟更新原始内容，确保DOM已完全更新
+            setTimeout(() => {
+                this.syncRawContent();
+            }, 50);
+        },
+
+        // 变量拖拽开始处理
+        onVariableDragStart(variable) {
+            this.globalDraggedElement = variable;
+        },
     }
 }
 </script>
 
 <style>
-/* ===== 通用样式 ===== */
-.preview-content u {
-    text-decoration: none; /* 移除默认下划线 */
-    border-bottom: 1px solid; /* 自定义下划线 */
-    padding-bottom: 1px; /* 调整间距 */
-    display: inline-block; /* 确保边框对齐 */
-    line-height: 0.9; /* 控制基线对齐 */
-}
-/* ===== 整体编辑器容器 ===== */
-.enhanced-editor {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    border: 1px solid #e8e8e8;
-    border-radius: 4px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-    padding: 15px;
-    background: #fff;
-    max-width: 800px;
-    margin: 0 auto;
-}
-
-.editor-title {
-    margin-top: 0;
-    margin-bottom: 15px;
-    color: #333;
-    font-weight: 500;
-    font-size: 18px;
-    border-bottom: 1px solid #f0f0f0;
-    padding-bottom: 10px;
-}
-
-/* ===== 变量按钮区域 ===== */
-.variable-buttons {
-    margin-bottom: 15px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-
-.var-btn {
-    padding: 6px 12px;
-    background: #409EFF;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    transition: all 0.3s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.var-btn:hover {
-    background: #66b1ff;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-}
-
-.add-btn {
-    background: #67C23A;
-}
-
-.add-btn:hover {
-    background: #85ce61;
-}
-
-.plus-icon {
-    font-style: normal;
-    font-weight: bold;
-    font-size: 16px;
-}
-
-/* ===== 内容编辑区域 ===== */
-.styled-editor {
-    min-height: 150px;
-    max-height: 400px;
-    /* overflow-y: auto; */
-    border: 1px solid #dcdfe6;
-    border-radius: 4px;
-    padding: 12px;
-    line-height: 1.5;
-    font-size: 14px;
-    white-space: pre-wrap;
-    color: #333;
-    transition: border-color 0.3s;
-    background-color: #fff;
-    margin-bottom: 10px;
-}
-
-.styled-editor:focus {
-    outline: none;
-    border-color: #409EFF;
-    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
-}
-
-.styled-editor:empty:before {
-    content: attr(data-placeholder);
-    color: #aaa;
-    pointer-events: none;
-}
-
-/* 变量标签样式 */
-.variable-tag {
-    color: #1890ff;
-    background-color: #e6f7ff;
-    border: 1px solid #91d5ff;
-    border-radius: 3px;
-    cursor: default;
-    user-select: none;
-    padding: 0 3px;
-    margin: 0 1px;
-    display: inline;
-    font-size: 13px;
-    line-height: normal;
-    vertical-align: baseline;
-}
-
-.variable-tag:hover {
-    position: relative;
-}
-
-.variable-tag:hover::after {
-    content: attr(data-description);
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    background-color: rgba(0, 0, 0, 0.75);
-    color: white;
-    padding: 5px 10px;
-    border-radius: 4px;
-    font-size: 12px;
-    white-space: nowrap;
-    z-index: 1000;
-    margin-bottom: 5px;
-}
-
-.variable-tag:hover::before {
-    content: '';
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%) rotate(180deg);
-    border-width: 5px;
-    border-style: solid;
-    border-color: transparent transparent rgba(0, 0, 0, 0.75) transparent;
-    margin-bottom: -4px;
-}
-
-/* ===== 工具栏区域 ===== */
-.editor-toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-top: 10px;
-    border-top: 1px solid #f0f0f0;
-    margin-bottom: 15px;
-}
-
-.toolbar-btn {
-    background: #f5f7fa;
-    border: 1px solid #dcdfe6;
-    padding: 6px 12px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    margin-right: 10px;
-    transition: all 0.3s;
-}
-
-.toolbar-btn:hover {
-    background: #ebeef5;
-    color: #409EFF;
-}
-
-.toolbar-btn:disabled {
-    background: #f5f7fa;
-    color: #c0c4cc;
-    cursor: not-allowed;
-    opacity: 0.7;
-}
-
-.add-btn {
-    background: #409EFF;
-    color: white;
-}
-
-.add-btn:hover:not(:disabled) {
-    background: #66b1ff;
-    color: white;
-}
-
-.add-btn:disabled {
-    background: #a0cfff;
-    color: white;
-}
-
-.char-count {
-    font-size: 12px;
-    color: #909399;
-}
-
-/* ===== 原始文本区域 ===== */
-.raw-text-section {
-    border: 1px solid #ebeef5;
-    border-radius: 4px;
-    background: #f9f9f9;
-    padding: 10px;
-    margin-top: 5px;
-}
-
-.raw-text-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-}
-
-.raw-text-header h4 {
-    margin: 0;
-    font-size: 16px;
-    color: #606266;
-    font-weight: 500;
-}
-
-.raw-text-actions {
-    display: flex;
-    gap: 5px;
-}
-
-.small-btn {
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    padding: 2px 5px;
-    border-radius: 3px;
-    transition: all 0.2s;
-}
-
-.small-btn:hover {
-    background: #ecf5ff;
-}
-
-.icon {
-    font-style: normal;
-    font-size: 16px;
-}
-
-.raw-text-preview {
-    width: 100%;
-    min-height: 80px;
-    max-height: 200px;
-    border: 1px solid #dcdfe6;
-    border-radius: 4px;
-    padding: 8px 12px;
-    font-family: monospace;
-    font-size: 13px;
-    line-height: 1.5;
-    color: #606266;
-    background-color: #f5f7fa;
-    resize: vertical;
-    box-sizing: border-box;
-    overflow-x: auto;
-}
-
-.raw-text-preview.editing {
-    background-color: #fff;
-    border-color: #409EFF;
-    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
-}
-
-.raw-text-preview.error {
-    border-color: #f56c6c;
-    background-color: #fff;
-    box-shadow: 0 0 0 2px rgba(245, 108, 108, 0.2);
-}
-
-.raw-text-preview:focus {
-    outline: none;
-}
-
-.error-message {
-    color: #f56c6c;
-    font-size: 13px;
-    margin-top: 5px;
-    display: flex;
-    align-items: center;
-}
-
-.error-icon {
-    margin-right: 5px;
-    font-style: normal;
-}
-
-.raw-edit-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 10px;
-    gap: 10px;
-}
-
-.cancel-raw-btn {
-    background: #f5f7fa;
-    border: 1px solid #dcdfe6;
-    padding: 5px 10px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-}
-
-.apply-raw-btn {
-    background: #409EFF;
-    color: white;
-    border: none;
-    padding: 5px 10px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-}
-
-.apply-raw-btn:disabled {
-    background: #a0cfff;
-    cursor: not-allowed;
-}
-
-/* ===== 模态框样式 ===== */
-.modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
-}
-
-.modal-content {
-    background: #fff;
-    border-radius: 4px;
-    padding: 20px;
-    width: 400px;
-    max-width: 90%;
-    box-sizing: border-box;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.form-group {
-    margin-bottom: 15px;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 5px;
-    font-size: 14px;
-    color: #333;
-}
-
-.form-group input {
-    width: 100%;
-    padding: 8px 12px;
-    box-sizing: border-box;
-    border: 1px solid #dcdfe6;
-    border-radius: 4px;
-    font-size: 14px;
-    transition: border-color 0.3s, box-shadow 0.3s;
-}
-
-.form-group input:focus {
-    outline: none;
-    border-color: #409EFF;
-    box-shadow:
-        0 0 0 1px rgba(64,158,255,0.4),   /* 内边框阴影（原0.3→0.4） */
-        0 0 0 2px rgba(64,158,255,0.3),   /* 内边框阴影（原0.3→0.4） */
-        0 0 12px rgba(64,158,255,0.2),    /* 外层模糊阴影（原8px→12px，0.2→0.3） */
-        0 4px 16px rgba(64,158,255,0.15); /* 新增扩散阴影 */
-    transition: box-shadow 0.2s ease;
-}
-
-/* 悬停预览优化 */
-.form-group input:hover:not(:focus) {
-    border-color: rgba(64,158,255,0.4);   /* 透明度40% */
-    box-shadow:
-        0 0 4px rgba(64,158,255,0.25),
-        0 2px 6px rgba(64,158,255,0.1);
-}
-
-.modal-actions {
-    display: flex;
-    gap: 25px;
-    justify-content: flex-end;
-    margin-top: 20px;
-}
-
-.primary-btn {
-    background: #409EFF;
-    color: white;
-    border: none;
-    padding: 8px 15px;
-    border-radius: 4px;
-    cursor: pointer;
-    margin-left: 10px;
-}
-
-.cancel-btn {
-    background: #f5f7fa;
-    border: 1px solid #dcdfe6;
-    padding: 8px 15px;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-/* ===== 预览区域样式 ===== */
-.preview-section {
-    border: 1px solid #ebeef5;
-    border-radius: 4px;
-    background: #f9f9f9;
-    padding: 10px;
-    margin-top: 15px;
-}
-
-.preview-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-}
-
-.preview-header h4 {
-    margin: 0;
-    font-size: 16px;
-    color: #606266;
-    font-weight: 500;
-}
-
-.preview-description {
-    font-size: 12px;
-    color: #909399;
-}
-
-.preview-content {
-    background-color: #fff;
-    border: 1px solid #dcdfe6;
-    border-radius: 4px;
-    padding: 12px;
-    min-height: 80px;
-    max-height: 200px;
-    overflow-y: auto;
-    line-height: 1.5;
-    font-size: 14px;
-    color: #333;
-}
-
-/* ===== 响应式设计 ===== */
-@media (max-width: 768px) {
-    .variable-buttons {
-        flex-wrap: wrap;
-    }
-
-    .var-btn {
-        margin-bottom: 8px;
-    }
-
-    .styled-editor {
-        min-height: 120px;
-    }
-
-    .raw-text-preview {
-        min-height: 60px;
-    }
-    
-    .preview-content {
-        min-height: 60px;
-    }
-}
+@import '@/assets/styles/editor.css';
 </style>

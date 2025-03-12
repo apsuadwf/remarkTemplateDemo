@@ -1,0 +1,351 @@
+/* 编辑器基本样式 */
+.enhanced-editor {
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    padding: 24px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, 
+                 "Helvetica Neue", Arial, sans-serif;
+    max-width: 900px;
+    margin: 24px auto;
+}
+
+.editor-title {
+    color: #303133;
+    font-size: 20px;
+    font-weight: 600;
+    margin-top: 0;
+    margin-bottom: 20px;
+    text-align: center;
+    position: relative;
+}
+
+/* 编辑区域样式 */
+.styled-editor {
+    border: 1px solid #dcdfe6;
+    min-height: 150px;
+    padding: 12px;
+    border-radius: 4px;
+    line-height: 1.5;
+    font-size: 14px;
+    color: #333;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    margin-bottom: 12px;
+    outline: none;
+    position: relative;
+    overflow-y: auto;
+    max-height: 400px;
+}
+
+.styled-editor:empty:before {
+    content: attr(data-placeholder);
+    color: #999;
+    pointer-events: none;
+}
+
+.styled-editor:focus {
+    border-color: #409EFF;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+}
+
+.styled-editor.drag-over {
+    border-color: #409EFF;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.3);
+    background-color: #f8fbff;
+}
+
+/* 变量标签样式 */
+.variable-tag {
+    display: inline-block;
+    background-color: #ecf5ff;
+    color: #409EFF;
+    border: 1px solid #d9ecff;
+    border-radius: 4px;
+    padding: 2px 8px;
+    margin: 0 2px;
+    font-size: 13px;
+    user-select: none;
+    cursor: move;
+    white-space: nowrap;
+    transition: all 0.2s;
+    position: relative;
+}
+
+.variable-tag:hover {
+    background-color: #f0f7ff;
+    border-color: #c6e2ff;
+    box-shadow: 0 2px 6px rgba(64, 158, 255, 0.2);
+}
+
+.variable-tag:active {
+    transform: scale(0.98);
+}
+
+.variable-tag[data-description]:hover:after {
+    content: attr(data-description);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.75);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 10;
+    margin-bottom: 5px;
+    pointer-events: none;
+}
+
+.variable-tag[data-description]:hover:before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: rgba(0, 0, 0, 0.75);
+    margin-bottom: -5px;
+    pointer-events: none;
+}
+
+/* 拖拽指示器 */
+.drop-indicator {
+    display: inline-block;
+    width: 2px;
+    min-height: 1.2em;
+    background-color: #409EFF;
+    vertical-align: middle;
+    animation: blink 1s infinite;
+    margin: 0 2px;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* 工具栏样式 */
+.editor-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding: 8px 0;
+    border-bottom: 1px solid #ebeef5;
+}
+
+.toolbar-btn {
+    background-color: #f5f7fa;
+    border: 1px solid #dcdfe6;
+    padding: 6px 12px;
+    border-radius: 4px;
+    margin-right: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #606266;
+    transition: all 0.2s;
+}
+
+.toolbar-btn:hover {
+    color: #409EFF;
+    border-color: #c6e2ff;
+    background-color: #f0f7ff;
+}
+
+.apply-btn {
+    background-color: #409EFF;
+    color: white;
+    border: none;
+}
+
+.apply-btn:hover {
+    background-color: #66b1ff;
+    color: white;
+}
+
+.apply-btn:disabled {
+    background-color: #a0cfff;
+    color: white;
+    cursor: not-allowed;
+}
+
+.char-count {
+    color: #909399;
+    font-size: 13px;
+}
+
+/* 原始文本区域样式 */
+.raw-text-section {
+    margin-bottom: 20px;
+    position: relative;
+}
+
+.raw-text-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.raw-text-header h4 {
+    margin: 0;
+    font-size: 16px;
+    color: #606266;
+    font-weight: 500;
+}
+
+.raw-text-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.small-btn {
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.small-btn:hover {
+    background-color: #f0f7ff;
+}
+
+.icon {
+    font-style: normal;
+    font-size: 16px;
+}
+
+.raw-text-preview {
+    width: 100%;
+    min-height: 100px;
+    max-height: 200px;
+    padding: 12px;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: monospace;
+    resize: vertical;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+    background-color: #f8f8f8;
+    color: #333;
+}
+
+.raw-text-preview:focus {
+    outline: none;
+    border-color: #409EFF;
+}
+
+.raw-text-preview.editing {
+    background-color: #fff;
+    border-color: #409EFF;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+}
+
+.raw-text-preview.error {
+    border-color: #f56c6c;
+    background-color: #fff0f0;
+}
+
+.error-message {
+    margin-top: 4px;
+    color: #f56c6c;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+}
+
+.error-icon {
+    margin-right: 4px;
+    font-style: normal;
+}
+
+.raw-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+    gap: 8px;
+}
+
+.cancel-raw-btn {
+    background-color: white;
+    color: #606266;
+    border: 1px solid #dcdfe6;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.apply-raw-btn {
+    background-color: #409EFF;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.apply-raw-btn:disabled {
+    background-color: #a0cfff;
+    cursor: not-allowed;
+}
+
+/* 预览区域样式 */
+.preview-section {
+    margin-top: 20px;
+}
+
+.preview-header {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 8px;
+}
+
+.preview-header h4 {
+    margin: 0;
+    font-size: 16px;
+    color: #606266;
+    font-weight: 500;
+}
+
+.preview-description {
+    font-size: 12px;
+    color: #909399;
+}
+
+.preview-content {
+    background-color: #fff;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    padding: 12px;
+    min-height: 80px;
+    max-height: 200px;
+    overflow-y: auto;
+    line-height: 1.5;
+    font-size: 14px;
+    color: #333;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .styled-editor {
+        min-height: 120px;
+    }
+
+    .raw-text-preview {
+        min-height: 60px;
+    }
+    
+    .preview-content {
+        min-height: 60px;
+    }
+} 
