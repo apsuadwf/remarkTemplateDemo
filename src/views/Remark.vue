@@ -101,6 +101,10 @@
                     <label>显示标签</label>
                     <input v-model="newVariable.label" placeholder="如：产品名称"/>
                 </div>
+                <div class="form-group">
+                    <label>示例值</label>
+                    <input v-model="newVariable.example" placeholder="如：iPhone 14 Pro Max"/>
+                </div>
                 <div class="modal-actions">
                     <button @click="addNewVariable" class="primary-btn">添加</button>
                     <button @click="showAddVariableModal = false" class="cancel-btn">取消</button>
@@ -116,37 +120,23 @@ export default {
         // 预览内容 - 使用示例值替换变量
         previewContent() {
             if (!this.rawContent) return '';
-            const safeColors = [
-                '#0055AA',   // 深蓝（对比度7.1:1）
-                '#004488',   // 海军蓝（对比度8.4:1）
-                '#2F4F4F',   // 深石板灰（对比度9.1:1）
-                '#006600',   // 深绿（对比度7.3:1）
-                '#663300',   // 深棕（对比度9.3:1）
-                '#990000',   // 深红（对比度7.1:1）
-                '#660066',   // 深紫（对比度9.2:1）
-                '#004400'    // 森林绿（对比度10.2:1）
-            ];
             let content = this.rawContent;
             const colorMap = new Map();
-            let i = 0;
             // 替换所有变量为示例值
             this.variables.forEach(variable => {
                 const regex = new RegExp(`\\$\\{${variable.name}\\}`, 'g');
                 const variableValue = variable.example || `[${variable.label}]`;
                 // 随机颜色
                 // const color = `#${Math.floor(Math.random() * 16777215).toString(16)}`;
-                // let hue = null;
-                //
-                // do {
-                //     hue = Math.floor(Math.random() * 360);
-                // }while (colorMap.has(hue));
-                //
-                // const color = `hsl(${hue}, 70%, 35%)`;
+                let hue = null;
+                do {
+                    hue = Math.floor(Math.random() * 360);
+                }while (colorMap.has(hue));
 
-                const color = safeColors[i%safeColors.length];
+                const color = `hsl(${hue}, 70%, 35%)`;
                 const underLine = `<u style="color: ${color};border-color: ${color};">${variableValue}</u>`;
                 content = content.replace(regex, underLine);
-                i++;
+
             });
             
             return content;
@@ -1150,6 +1140,7 @@ export default {
     padding: 20px;
     width: 400px;
     max-width: 90%;
+    box-sizing: border-box;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
@@ -1167,9 +1158,30 @@ export default {
 .form-group input {
     width: 100%;
     padding: 8px 12px;
+    box-sizing: border-box;
     border: 1px solid #dcdfe6;
     border-radius: 4px;
     font-size: 14px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: #409EFF;
+    box-shadow:
+        0 0 0 1px rgba(64,158,255,0.4),   /* 内边框阴影（原0.3→0.4） */
+        0 0 0 2px rgba(64,158,255,0.3),   /* 内边框阴影（原0.3→0.4） */
+        0 0 12px rgba(64,158,255,0.2),    /* 外层模糊阴影（原8px→12px，0.2→0.3） */
+        0 4px 16px rgba(64,158,255,0.15); /* 新增扩散阴影 */
+    transition: box-shadow 0.2s ease;
+}
+
+/* 悬停预览优化 */
+.form-group input:hover:not(:focus) {
+    border-color: rgba(64,158,255,0.4);   /* 透明度40% */
+    box-shadow:
+        0 0 4px rgba(64,158,255,0.25),
+        0 2px 6px rgba(64,158,255,0.1);
 }
 
 .modal-actions {
