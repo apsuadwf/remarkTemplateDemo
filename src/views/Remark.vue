@@ -2,13 +2,27 @@
     <div class="enhanced-editor">
         <h3 class="editor-title">备注模板编辑器</h3>
 
-        <!-- 使用变量选择器组件 -->
-        <variable-selector 
-            :variables="variables"
-            @drag-start="onVariableDragStart"
-            @show-add-variable="showAddVariableModal = true"
-        />
-
+        <!-- 变量选择区 -->
+        <div class="variable-buttons">
+            <div
+                v-for="varItem in variables"
+                :key="varItem.name"
+                class="var-btn"
+                :title="`拖拽${varItem.label}变量至编辑区`"
+                draggable="true"
+                @dragstart="onDragStart($event, varItem)"
+            >
+                {{ varItem.label }}
+            </div>
+            <button
+                class="var-btn add-btn"
+                @click="showAddVariableModal = true"
+                title="添加自定义变量"
+            >
+                <i class="plus-icon">+</i>
+            </button>
+        </div>
+        
         <!-- 拖拽提示 -->
         <div class="drag-tip">
             <i class="tip-icon">💡</i> 
@@ -86,44 +100,56 @@
             style="display: none;"
         ></textarea>
 
-        <!-- 使用变量添加弹窗组件 -->
-        <variable-add-modal
-            :visible="showAddVariableModal"
-            :existing-variables="variables"
-            @close="showAddVariableModal = false"
-            @add-variable="addVariable"
-        />
+        <!-- 添加变量弹窗 (简单实现) -->
+        <div v-if="showAddVariableModal" class="modal-overlay">
+            <div class="modal-content">
+                <h3>添加自定义变量</h3>
+                <div class="form-group">
+                    <label>变量名称</label>
+                    <input v-model="newVariable.name" placeholder="如：productName"/>
+                </div>
+                <div class="form-group">
+                    <label>显示标签</label>
+                    <input v-model="newVariable.label" placeholder="如：产品名称"/>
+                </div>
+                <div class="form-group">
+                    <label>示例值</label>
+                    <input v-model="newVariable.example" placeholder="如：iPhone 14 Pro Max"/>
+                </div>
+                <div class="modal-actions">
+                    <button @click="addNewVariable" class="primary-btn">添加</button>
+                    <button @click="showAddVariableModal = false" class="cancel-btn">取消</button>
+                </div>
+            </div>
+        </div>
     </div>
 </template>
 
 <script>
-import {
-    checkForInvalidContent,
-    convertHtmlToRawText,
-    convertVariablesToHtml,
-    defaultVariables,
-    generatePreviewContent
-} from '@/utils/variables';
-import {copyElementContent} from '@/utils/domUtils';
-import {
-    handleDragEnter,
-    handleDragLeave,
-    handleDragOver,
-    handleVariableDrop,
-    removeAllDropIndicators
-} from '@/utils/dragUtils';
-import VariableSelector from '@/components/VariableSelector.vue';
-import VariableAddModal from '@/components/VariableAddModal.vue';
-
 export default {
-    components: {
-        VariableSelector,
-        VariableAddModal
-    },
     computed: {
         // 预览内容 - 使用示例值替换变量
         previewContent() {
-            return generatePreviewContent(this.rawContent, this.variables);
+            if (!this.rawContent) return '';
+            let content = this.rawContent;
+            const colorMap = new Map();
+            
+            // 替换所有变量为示例值
+            this.variables.forEach(variable => {
+                const regex = new RegExp(`\\$\\{${variable.name}\\}`, 'g');
+                const variableValue = variable.example || `[${variable.label}]`;
+                
+                let hue = null;
+                do {
+                    hue = Math.floor(Math.random() * 360);
+                } while (colorMap.has(hue));
+
+                const color = `hsl(${hue}, 70%, 35%)`;
+                const underLine = `<u style="color: ${color};border-color: ${color};">${variableValue}</u>`;
+                content = content.replace(regex, underLine);
+            });
+            
+            return content;
         }
     },
     data() {
@@ -136,11 +162,43 @@ export default {
             hasInvalidContent: false, // 是否包含非法内容
             
             // 变量相关
-            variables: [...defaultVariables],
+            variables: [
+                {
+                    name: 'userName',
+                    label: '用户姓名',
+                    example: "张三",
+                    description: "用户的真实姓名",
+                },
+                {
+                    name: 'orderNo',
+                    label: '订单编号',
+                    example: "ORD202312250001",
+                    description: "系统生成的订单唯一编号",
+                },
+                {
+                    name: 'productName',
+                    label: '产品名称',
+                    example: "智能手机 Pro Max",
+                    description: "产品的完整名称",
+                },
+                {
+                    name: 'date',
+                    label: '日期',
+                    example: "2023-12-25",
+                    description: "日期格式：YYYY-MM-DD",
+                },
+                {
+                    name: 'amount',
+                    label: '金额',
+                    example: "1999.00",
+                    description: "金额（元），最多保留两位小数",
+                }
+            ],
 
             // 新增变量相关
             showAddVariableModal: false, // 是否显示添加变量弹窗
-            
+            newVariable: {name: '', label: ''}, // 新变量数据
+
             // 编辑器状态相关
             placeholder: '在此输入内容，可以从上方拖拽变量至此...', // 编辑器占位符
             lastCursorPosition: null, // 上次光标位置
@@ -151,6 +209,7 @@ export default {
 
             // 原始文本编辑状态
             editingRawText: false, // 是否正在编辑原始文本
+            editDelay: null, // 防抖延迟器
 
             // 拖拽相关
             globalDraggedElement: null, // 全局拖拽元素引用
@@ -206,7 +265,18 @@ export default {
 
         // 检查原始文本是否包含HTML标签或特殊字符
         checkForInvalidContent(text) {
-            return checkForInvalidContent(text);
+            if (!text) return false;
+
+            // 检查HTML标签
+            const htmlTagRegex = /<[^>]*>/;
+            if (htmlTagRegex.test(text)) {
+                return true;
+            }
+
+            // 检查特殊字符（除了常规标点和变量标记）
+            // 排除：字母、数字、中文字符、常规标点和变量标记 ${xxx}
+            const safeCharRegex = /^[\u4e00-\u9fa5a-zA-Z0-9\s,.?!;:'"()[\]{}。，、；：''""《》【】\-_${}]+$/;
+            return !safeCharRegex.test(text);
         },
 
         // 切换原始文本编辑模式
@@ -296,9 +366,19 @@ export default {
                 return;
             }
 
-            // 转换变量为HTML
-            const html = convertVariablesToHtml(this.rawContent, this.variables);
-            
+            let html = this.rawContent;
+
+            // 将变量标记 ${xxx} 转换为HTML变量标签
+            const varRegex = /\$\{([^}]+)\}/g;
+            html = html.replace(varRegex, (match, varName) => {
+                // 查找对应的变量标签文本
+                const variable = this.variables.find(v => v.name === varName);
+                const label = variable ? variable.label : varName;
+                const description = variable ? variable.description : '';
+                // 返回HTML变量标签
+                return `<span class="variable-tag" contenteditable="false" data-variable="${varName}" data-description="${description}" draggable="true">${label}</span>`;
+            });
+
             // 应用到编辑器
             this.$refs.editor.innerHTML = html;
 
@@ -317,7 +397,42 @@ export default {
                 return '';
             }
 
-            return convertHtmlToRawText(this.$refs.editor);
+            // 创建临时容器保存当前HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = this.$refs.editor.innerHTML;
+
+            // 移除所有空的 <br> 标签
+            const brElements = tempDiv.querySelectorAll('br');
+            brElements.forEach(br => {
+                if (br.parentNode === tempDiv && tempDiv.childNodes.length === 1) {
+                    br.remove();
+                }
+            });
+
+            // 移除所有放置指示器
+            const indicators = tempDiv.querySelectorAll('.drop-indicator');
+            indicators.forEach(indicator => indicator.remove());
+
+            // 替换所有变量标签为变量标记
+            let result = tempDiv.innerHTML;
+            
+            // 使用更可靠的方式获取所有变量标签
+            Array.from(tempDiv.querySelectorAll('.variable-tag')).forEach(el => {
+                const varName = el.dataset.variable;
+                if (varName) {
+                    // 使用正则表达式全局替换，确保所有匹配的实例都被替换
+                    const pattern = new RegExp(el.outerHTML.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                    result = result.replace(pattern, `\${${varName}}`);
+                }
+            });
+
+            // 清理可能的多余HTML标签
+            result = result.replace(/<div><\/div>/g, '')
+                           .replace(/<p><\/p>/g, '')
+                           .replace(/&nbsp;/g, ' ')
+                           .trim();
+
+            return result;
         },
 
         // ===== 变量处理相关方法 =====
@@ -511,13 +626,15 @@ export default {
         },
 
         // 添加新变量
-        addVariable(variable) {
-            // 检查变量名是否已存在
-            const exists = this.variables.some(v => v.name === variable.name);
-            
-            if (!exists) {
-                this.variables.push({...variable});
-                this.showAddVariableModal = false;
+        addNewVariable() {
+            if (this.newVariable.name && this.newVariable.label) {
+                // 检查变量名是否已存在
+                const exists = this.variables.some(v => v.name === this.newVariable.name);
+                if (!exists) {
+                    this.variables.push({...this.newVariable});
+                    this.newVariable = {name: '', label: ''};
+                    this.showAddVariableModal = false;
+                }
             }
         },
 
@@ -780,10 +897,17 @@ export default {
 
         // 复制内容
         copyContent() {
-            if (copyElementContent(this.$refs.editor)) {
+            try {
+                // 复制原始内容（含变量标记）
+                const textarea = document.createElement('textarea');
+                textarea.value = this.rawContent;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
                 alert('内容已复制到剪贴板');
-            } else {
-                alert('复制失败，请手动选择并复制');
+            } catch (err) {
+                console.error('复制失败:', err);
             }
         },
 
@@ -795,54 +919,238 @@ export default {
             e.dataTransfer.effectAllowed = 'copy';
         },
 
-        // 拖拽经过
-        onDragOver(event) {
-            handleDragOver(event, this.$refs.editor);
+        onDragOver(e) {
+            e.preventDefault();
+            
+            // 设置拖拽效果为复制或移动
+            let isMove = false;
+            
+            // 根据拖拽元素的来源决定效果
+            if (this.globalDraggedElement) {
+                isMove = true;
+                e.dataTransfer.dropEffect = 'move';
+            } else {
+                e.dataTransfer.dropEffect = 'copy';
+            }
+            
+            // 突出显示拖拽区域
+            this.$refs.editor.classList.add('drag-over');
+            
+            // 确定放置位置指示器
+            this.showDropPositionIndicator(e, isMove);
         },
 
-        // 拖拽进入
-        onDragEnter(event) {
-            handleDragEnter(event, this.$refs.editor);
+        // 显示放置位置指示器
+        showDropPositionIndicator(e, isMove) {
+            const editor = this.$refs.editor;
+            
+            // 删除之前的指示器
+            const existingIndicator = editor.querySelector('.drop-indicator');
+            if (existingIndicator) {
+                existingIndicator.remove();
+            }
+            
+            // 获取当前光标位置
+            const range = this.getDropRangeFromPoint(e.clientX, e.clientY);
+            if (!range) return;
+            
+            // 检查是否在当前拖拽元素前后，避免在自身位置放置导致消失
+            if (isMove && this.globalDraggedElement) {
+                const draggedRect = this.globalDraggedElement.getBoundingClientRect();
+                const indicatorX = e.clientX;
+                const indicatorY = e.clientY;
+                
+                // 检查是否在拖拽元素范围内或紧邻处
+                if (
+                    indicatorX >= draggedRect.left - 5 && 
+                    indicatorX <= draggedRect.right + 5 &&
+                    indicatorY >= draggedRect.top - 5 && 
+                    indicatorY <= draggedRect.bottom + 5
+                ) {
+                    return; // 跳过在元素自身位置的放置
+                }
+            }
+            
+            // 创建指示器
+            const indicator = document.createElement('span');
+            indicator.className = 'drop-indicator';
+            
+            // 计算位置并插入指示器
+            try {
+                range.insertNode(indicator);
+            } catch (error) {
+                console.error('无法插入拖放指示器:', error);
+            }
+            
+            // 保存当前放置位置
+            this.currentDropRange = range.cloneRange();
         },
 
-        // 拖拽离开
-        onDragLeave(event) {
-            handleDragLeave(event, this.$refs.editor);
+        onDragEnter(e) {
+            e.preventDefault();
+            this.$refs.editor.classList.add('drag-over');
         },
 
-        // 拖拽放下
-        onDrop(event) {
-            event.preventDefault();
-            event.stopPropagation();
+        onDragLeave(e) {
+            e.preventDefault();
+            // 检查是否真的离开了编辑器区域
+            const relatedTarget = e.relatedTarget;
+            if (!relatedTarget || !this.$refs.editor.contains(relatedTarget)) {
+                this.$refs.editor.classList.remove('drag-over');
+                // 移除放置指示器
+                const indicator = this.$refs.editor.querySelector('.drop-indicator');
+                if (indicator) {
+                    indicator.remove();
+                }
+            }
+        },
+
+        onDrop(e) {
+            e.preventDefault();
+            
+            // 移除拖拽样式
+            this.$refs.editor.classList.remove('drag-over');
             
             try {
-                const data = event.dataTransfer.getData('text/plain');
-                if (!data) return;
+                // 获取变量数据
+                const data = e.dataTransfer.getData('text/plain');
+                const varItem = JSON.parse(data);
                 
-                const variable = JSON.parse(data);
-                
-                // 创建变量HTML
-                const variableHtml = `<span class="variable-tag" contenteditable="false" data-variable="${variable.name}" data-description="${variable.description || ''}" draggable="true">${variable.label}</span>`;
-                
-                // 处理放置
-                if (handleVariableDrop(event, this.$refs.editor, (v) => {
-                    return `<span class="variable-tag" contenteditable="false" data-variable="${v.name}" data-description="${v.description || ''}" draggable="true">${v.label}</span>`;
-                })) {
-                    // 更新内容
-                    this.onEditorInput();
-                    
-                    // 保护变量
-                    this.protectVariables();
+                // 移除拖放指示器
+                const indicator = this.$refs.editor.querySelector('.drop-indicator');
+                if (indicator) {
+                    indicator.remove();
                 }
                 
-                // 移除放置标记
-                removeAllDropIndicators(this.$refs.editor);
+                if (varItem.isInEditor && this.globalDraggedElement) {
+                    // 编辑器内变量移动
+                    this.moveVariableInEditor(varItem);
+                } else {
+                    // 从按钮区拖入的新变量
+                    this.insertVariableAtDropPosition(varItem);
+                }
                 
-                // 移除拖拽状态
-                this.$refs.editor.classList.remove('drag-over');
-            } catch (e) {
-                console.error('放置变量失败:', e);
+                // 在所有操作完成后，确保再次同步原始内容
+                setTimeout(() => {
+                    // 保护新变量并同步
+                    this.protectVariables();
+                    this.syncRawContent();
+                }, 100);
+            } catch (error) {
+                console.error('处理拖放操作失败:', error);
             }
+        },
+
+        // 在编辑器内移动变量
+        moveVariableInEditor(varItem) {
+            // 如果有拖拽元素并且有放置位置
+            if (this.globalDraggedElement && this.currentDropRange) {
+                try {
+                    // 创建变量元素的副本
+                    const newVarEl = this.createVariableElement(varItem);
+                    
+                    // 插入新元素
+                    this.currentDropRange.insertNode(newVarEl);
+                    
+                    // 删除原始元素
+                    if (this.globalDraggedElement && this.globalDraggedElement.parentNode) {
+                        this.globalDraggedElement.parentNode.removeChild(this.globalDraggedElement);
+                    }
+                    
+                    // 更新编辑器内容和选区
+                    this.syncRawContent();
+                    this.protectVariables();
+                    this.updateCharCount();
+                    
+                    // 将焦点设置到新插入的变量后面
+                    const selection = window.getSelection();
+                    const range = document.createRange();
+                    range.setStartAfter(newVarEl);
+                    range.collapse(true);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                    
+                    // 确保编辑器获得焦点
+                    this.$refs.editor.focus();
+                    
+                    // 保存新的光标位置
+                    this.saveCaretPosition();
+                    
+                    // 确保 rawContent 被更新，添加延迟以确保 DOM 更新完成
+                    setTimeout(() => {
+                        this.syncRawContent();
+                    }, 50);
+                } catch (error) {
+                    console.error('移动变量失败:', error);
+                }
+            }
+            
+            // 重置拖拽状态
+            this.globalDraggedElement = null;
+            this.currentDropRange = null;
+        },
+
+        // 插入变量到放置位置
+        insertVariableAtDropPosition(varItem) {
+            try {
+                // 如果有放置位置
+                if (this.currentDropRange) {
+                    // 创建变量元素
+                    const varEl = this.createVariableElement(varItem);
+                    
+                    // 插入变量
+                    this.currentDropRange.insertNode(varEl);
+                    
+                    // 更新光标位置到变量后面
+                    const selection = window.getSelection();
+                    const range = document.createRange();
+                    range.setStartAfter(varEl);
+                    range.collapse(true);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                    
+                    // 确保编辑器获得焦点
+                    this.$refs.editor.focus();
+                    
+                    // 保存选区和同步内容
+                    this.saveCaretPosition();
+                    this.syncRawContent();
+                    this.protectVariables();
+                    this.updateCharCount();
+                    
+                    // 确保 rawContent 被更新，添加延迟以确保 DOM 更新完成
+                    setTimeout(() => {
+                        this.syncRawContent();
+                    }, 50);
+                } else {
+                    // 使用原来的插入方法
+                    this.insertVariable(varItem);
+                }
+            } catch (error) {
+                console.error('插入变量失败:', error);
+                // 失败时使用原方法
+                this.insertVariable(varItem);
+            }
+            
+            // 重置放置位置
+            this.currentDropRange = null;
+        },
+
+        // 创建变量元素
+        createVariableElement(varItem) {
+            const varEl = document.createElement('span');
+            varEl.className = 'variable-tag';
+            varEl.contentEditable = 'false';
+            varEl.dataset.variable = varItem.name;
+            varEl.dataset.description = varItem.description || '';
+            varEl.textContent = varItem.label;
+            varEl.draggable = true;
+            
+            // 添加拖拽事件
+            varEl.addEventListener('dragstart', this.handleVariableDragStart);
+            varEl.addEventListener('dragend', this.handleVariableDragEnd);
+            
+            return varEl;
         },
 
         // 变量拖拽开始事件处理
@@ -899,14 +1207,664 @@ export default {
             }, 50);
         },
 
-        // 变量拖拽开始处理
-        onVariableDragStart(variable) {
-            this.globalDraggedElement = variable;
+        // 从坐标点获取放置范围
+        getDropRangeFromPoint(x, y) {
+            // 使用文档方法获取放置位置元素
+            const element = document.elementFromPoint(x, y);
+            if (!element || !this.$refs.editor.contains(element)) {
+                return null;
+            }
+            
+            // 创建范围
+            const range = document.createRange();
+            
+            // 检查如果点击的是变量元素
+            if (element.classList.contains('variable-tag')) {
+                // 计算鼠标位置是在变量左侧还是右侧
+                const rect = element.getBoundingClientRect();
+                const elementCenterX = rect.left + rect.width / 2;
+                
+                if (x < elementCenterX) {
+                    // 如果在左侧，设置在变量之前
+                    range.setStartBefore(element);
+                } else {
+                    // 如果在右侧，设置在变量之后
+                    range.setStartAfter(element);
+                }
+                range.collapse(true);
+                return range;
+            }
+            
+            // 使用caretPositionFromPoint/caretRangeFromPoint获取准确位置
+            if (document.caretPositionFromPoint) {
+                const position = document.caretPositionFromPoint(x, y);
+                if (position) {
+                    range.setStart(position.offsetNode, position.offset);
+                    range.collapse(true);
+                    return range;
+                }
+            } else if (document.caretRangeFromPoint) {
+                const caretRange = document.caretRangeFromPoint(x, y);
+                if (caretRange) {
+                    return caretRange;
+                }
+            }
+            
+            // 后备方案：设置在当前节点的末尾
+            try {
+                if (element.nodeType === Node.TEXT_NODE) {
+                    range.setStart(element, element.textContent.length);
+                } else {
+                    range.selectNodeContents(element);
+                    range.collapse(false);
+                }
+                range.collapse(true);
+                return range;
+            } catch (e) {
+                console.error('创建放置范围失败:', e);
+                return null;
+            }
         },
     }
 }
 </script>
 
 <style>
-@import '@/assets/styles/editor.css';
+/* ===== 通用样式 ===== */
+.preview-content u {
+    text-decoration: none; /* 移除默认下划线 */
+    border-bottom: 1px solid; /* 自定义下划线 */
+    padding-bottom: 1px; /* 调整间距 */
+    display: inline-block; /* 确保边框对齐 */
+    line-height: 0.9; /* 控制基线对齐 */
+}
+
+/* ===== 拖拽样式 ===== */
+.var-btn {
+    padding: 6px 12px;
+    background: #409EFF;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: grab;
+    font-size: 14px;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    touch-action: none;
+}
+
+.var-btn:hover {
+    /* 移除hover样式 */
+    /* background: #66b1ff;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1); */
+}
+
+.var-btn:active {
+    cursor: grabbing;
+    transform: scale(0.98);
+}
+
+.add-btn {
+    background: #67C23A;
+    cursor: pointer;
+}
+
+.add-btn:hover {
+    /* 移除hover样式 */
+    /* background: #85ce61; */
+}
+
+.plus-icon {
+    font-style: normal;
+    font-weight: bold;
+    font-size: 16px;
+}
+
+/* 编辑器拖拽样式 */
+.styled-editor.drag-over {
+    border-color: #409EFF;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+    background-color: #f4f8ff;
+    transition: all 0.3s ease;
+}
+
+.styled-editor.drag-over::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    border: 2px dashed rgba(64, 158, 255, 0.4);
+    border-radius: 3px;
+    z-index: 0;
+    animation: borderPulse 2s infinite ease-in-out;
+}
+
+@keyframes borderPulse {
+    0% { border-color: rgba(64, 158, 255, 0.2); }
+    50% { border-color: rgba(64, 158, 255, 0.6); }
+    100% { border-color: rgba(64, 158, 255, 0.2); }
+}
+
+/* ===== 变量标签样式 ===== */
+.variable-tag {
+    color: #1890ff;
+    background-color: #e6f7ff;
+    border: 1px solid #91d5ff;
+    border-radius: 3px;
+    cursor: grab;
+    user-select: none;
+    padding: 0 3px;
+    margin: 0 1px;
+    display: inline-block;
+    font-size: 13px;
+    line-height: normal;
+    vertical-align: middle;
+    transition: background-color 0.2s, transform 0.2s, box-shadow 0.2s;
+    position: relative;
+    z-index: 1;
+    vertical-align: baseline;
+    height: auto;
+    box-sizing: border-box;
+    line-height: 1.5;
+}
+
+.variable-tag:hover {
+    /* 移除hover样式 */
+    /* background-color: #d9efff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+    z-index: 2; */
+}
+
+.variable-tag:active {
+    cursor: grabbing;
+    transform: scale(0.98);
+}
+
+.variable-tag.dragging {
+    opacity: 0.6;
+    background-color: #b7e1ff;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
+    transform: scale(1.05);
+    z-index: 10;
+    animation: pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(64, 158, 255, 0.4); }
+    70% { box-shadow: 0 0 0 6px rgba(64, 158, 255, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(64, 158, 255, 0); }
+}
+
+.variable-tag:hover::after {
+    /* 移除hover提示 */
+    /* content: attr(data-description);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgba(0, 0, 0, 0.75);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 1000;
+    margin-bottom: 5px; */
+    display: none;
+}
+
+.variable-tag:hover::before {
+    /* 移除hover提示箭头 */
+    /* content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) rotate(180deg);
+    border-width: 5px;
+    border-style: solid;
+    border-color: transparent transparent rgba(0, 0, 0, 0.75) transparent;
+    margin-bottom: -4px; */
+    display: none;
+}
+
+/* ===== 放置指示器样式 ===== */
+.drop-indicator {
+    display: inline-block;
+    width: 2px;
+    height: 1.5em;
+    background-color: #409EFF;
+    vertical-align: middle;
+    animation: blink 1s infinite;
+    margin: 0 2px;
+    position: relative;
+    z-index: 5;
+    box-shadow: 0 0 4px rgba(64, 158, 255, 0.6);
+    vertical-align: text-bottom;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* ===== 整体编辑器容器 ===== */
+.enhanced-editor {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    border: 1px solid #e8e8e8;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    padding: 15px;
+    background: #fff;
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.editor-title {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #333;
+    font-weight: 500;
+    font-size: 18px;
+    border-bottom: 1px solid #f0f0f0;
+    padding-bottom: 10px;
+}
+
+/* ===== 变量按钮区域 ===== */
+.variable-buttons {
+    margin-bottom: 15px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* ===== 内容编辑区域 ===== */
+.styled-editor {
+    min-height: 150px;
+    max-height: 400px;
+    /* overflow-y: auto; */
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    padding: 12px;
+    line-height: 1.5;
+    font-size: 14px;
+    white-space: pre-wrap;
+    color: #333;
+    transition: border-color 0.3s;
+    background-color: #fff;
+    margin-bottom: 10px;
+    position: relative; /* 添加相对定位 */
+    cursor: text;
+    overflow: auto;
+}
+
+.styled-editor:focus {
+    outline: none;
+    border-color: #409EFF;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+}
+
+.styled-editor:empty:before {
+    content: attr(data-placeholder);
+    color: #aaa;
+    pointer-events: none;
+}
+
+/* ===== 工具栏区域 ===== */
+.editor-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 10px;
+    border-top: 1px solid #f0f0f0;
+    margin-bottom: 15px;
+}
+
+.toolbar-btn {
+    background: #f5f7fa;
+    border: 1px solid #dcdfe6;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-right: 10px;
+    transition: all 0.3s;
+}
+
+.toolbar-btn:hover {
+    /* 移除hover样式 */
+    /* background: #ebeef5;
+    color: #409EFF; */
+}
+
+.toolbar-btn:disabled {
+    background: #f5f7fa;
+    color: #c0c4cc;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.add-btn {
+    background: #409EFF;
+    color: white;
+}
+
+.add-btn:hover:not(:disabled) {
+    /* 移除hover样式 */
+    /* background: #66b1ff;
+    color: white; */
+}
+
+.add-btn:disabled {
+    background: #a0cfff;
+    color: white;
+}
+
+.char-count {
+    font-size: 12px;
+    color: #909399;
+}
+
+/* ===== 原始文本区域 ===== */
+.raw-text-section {
+    border: 1px solid #ebeef5;
+    border-radius: 4px;
+    background: #f9f9f9;
+    padding: 10px;
+    margin-top: 5px;
+}
+
+.raw-text-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.raw-text-header h4 {
+    margin: 0;
+    font-size: 16px;
+    color: #606266;
+    font-weight: 500;
+}
+
+.raw-text-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.small-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 2px 5px;
+    border-radius: 3px;
+    transition: all 0.2s;
+}
+
+.small-btn:hover {
+    /* 移除hover样式 */
+    /* background: #ecf5ff; */
+}
+
+.icon {
+    font-style: normal;
+    font-size: 16px;
+}
+
+.raw-text-preview {
+    width: 100%;
+    min-height: 80px;
+    max-height: 200px;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-family: monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #606266;
+    background-color: #f5f7fa;
+    resize: vertical;
+    box-sizing: border-box;
+    overflow-x: auto;
+}
+
+.raw-text-preview.editing {
+    background-color: #fff;
+    border-color: #409EFF;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+}
+
+.raw-text-preview.error {
+    border-color: #f56c6c;
+    background-color: #fff;
+    box-shadow: 0 0 0 2px rgba(245, 108, 108, 0.2);
+}
+
+.raw-text-preview:focus {
+    outline: none;
+}
+
+.error-message {
+    color: #f56c6c;
+    font-size: 13px;
+    margin-top: 5px;
+    display: flex;
+    align-items: center;
+}
+
+.error-icon {
+    margin-right: 5px;
+    font-style: normal;
+}
+
+.raw-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 10px;
+    gap: 10px;
+}
+
+.cancel-raw-btn {
+    background: #f5f7fa;
+    border: 1px solid #dcdfe6;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.apply-raw-btn {
+    background: #409EFF;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.apply-raw-btn:disabled {
+    background: #a0cfff;
+    cursor: not-allowed;
+}
+
+/* ===== 模态框样式 ===== */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: #fff;
+    border-radius: 4px;
+    padding: 20px;
+    width: 400px;
+    max-width: 90%;
+    box-sizing: border-box;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 14px;
+    color: #333;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 8px 12px;
+    box-sizing: border-box;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    font-size: 14px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: #409EFF;
+    box-shadow:
+        0 0 0 1px rgba(64,158,255,0.4),   /* 内边框阴影（原0.3→0.4） */
+        0 0 0 2px rgba(64,158,255,0.3),   /* 内边框阴影（原0.3→0.4） */
+        0 0 12px rgba(64,158,255,0.2),    /* 外层模糊阴影（原8px→12px，0.2→0.3） */
+        0 4px 16px rgba(64,158,255,0.15); /* 新增扩散阴影 */
+    transition: box-shadow 0.2s ease;
+}
+
+/* 悬停预览优化 */
+.form-group input:hover:not(:focus) {
+    /* 移除hover样式 */
+    /* border-color: rgba(64,158,255,0.4);
+    box-shadow:
+        0 0 4px rgba(64,158,255,0.25),
+        0 2px 6px rgba(64,158,255,0.1); */
+}
+
+.modal-actions {
+    display: flex;
+    gap: 25px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+.primary-btn {
+    background: #409EFF;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-left: 10px;
+}
+
+.cancel-btn {
+    background: #f5f7fa;
+    border: 1px solid #dcdfe6;
+    padding: 8px 15px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+/* ===== 预览区域样式 ===== */
+.preview-section {
+    border: 1px solid #ebeef5;
+    border-radius: 4px;
+    background: #f9f9f9;
+    padding: 10px;
+    margin-top: 15px;
+}
+
+.preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.preview-header h4 {
+    margin: 0;
+    font-size: 16px;
+    color: #606266;
+    font-weight: 500;
+}
+
+.preview-description {
+    font-size: 12px;
+    color: #909399;
+}
+
+.preview-content {
+    background-color: #fff;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    padding: 12px;
+    min-height: 80px;
+    max-height: 200px;
+    overflow-y: auto;
+    line-height: 1.5;
+    font-size: 14px;
+    color: #333;
+}
+
+/* ===== 响应式设计 ===== */
+@media (max-width: 768px) {
+    .variable-buttons {
+        flex-wrap: wrap;
+    }
+
+    .var-btn {
+        margin-bottom: 8px;
+    }
+
+    .styled-editor {
+        min-height: 120px;
+    }
+
+    .raw-text-preview {
+        min-height: 60px;
+    }
+    
+    .preview-content {
+        min-height: 60px;
+    }
+}
+
+/* 提示样式 */
+.drag-tip {
+    background-color: #f0f7ff;
+    border-left: 4px solid #409EFF;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    border-radius: 0 4px 4px 0;
+    font-size: 13px;
+    color: #666;
+    display: flex;
+    align-items: center;
+}
+
+.tip-icon {
+    margin-right: 8px;
+    font-style: normal;
+    font-size: 15px;
+}
 </style>
